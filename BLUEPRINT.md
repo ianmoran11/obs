@@ -12,7 +12,7 @@ The architecture is intentionally three things at once:
 2. **A compilable specification.** The Lean spec is data — `deriving ToJson` produces a backend-agnostic intermediate representation (IR).
 3. **A high-throughput runtime** in DuckDB. The IR compiles to SQL macros that run the simulation over a per-person event log.
 
-The first version targets the **justice pipeline** (Offending → Police → Courts → Corrections) on a static population carrier, with education and employment slotted in as additional lenses sharing the same carrier in v2.
+The first version targets the **justice pipeline** (Offending → Police → Courts → Corrections) on a static `Person` substrate, with education and employment slotted in as additional lenses sharing the same substrate in v2.
 
 ## 2. Theoretical foundations
 
@@ -103,9 +103,9 @@ This is option **(b)** from the design discussion. It plays well with DuckDB by 
 
 ## 3. Domain model
 
-### 3.1 Carrier: Population
+### 3.1 Substrate: `Person`, owned by the Population lens
 
-Every other lens passes a `Person` through unchanged, so `Person` is the *carrier object* of the simulation. Demographics are read by every kernel as covariates but mutated only by Population.
+Every domain lens reads a per-person record `Person` (demographic covariates) but only the Population lens writes to it. So `Person` is the **shared substrate** of the simulator — the factor that every lens's state space has in common.
 
 ```
 Person :=
@@ -117,8 +117,14 @@ Person :=
   -- + role flags set by domain lenses (offender? victim?)
 ```
 
+**A note on terminology.** "Carrier" is overloaded. In strict coalgebraic usage, the *carrier* of an `F`-coalgebra is the object `X` of the pair `(X, c : X → F(X))` — the object the dynamics `c` act on. By that definition, each lens has its own carrier: the Police lens's carrier is `Person × PoliceState`, because both are needed to step the dynamics. `Person` is *not* the carrier of any single coalgebra; it is the **shared base** that every lens's carrier has as a factor.
+
+The precise statement is: each domain lens admits a *behaviour-preserving morphism* (in the sense of [Libkind & Myers](theory-documents/Towards%20a%20double%20operadic%20theory%20of%20systems.pdf)) from its carrier to `Person`, given by the projection `(Person × DomainState) → Person`. The Population lens is distinguished as the unique lens whose carrier *is* `Person`. Equivalently, and closer to the implementation, non-Population kernels factor through a Reader-comonad-style read of `Person` with no Put — they have lens access with trivial backward leg on the demographic component.
+
+This document uses **substrate** as the working term and reserves **carrier** for its strict coalgebraic meaning.
+
 ```text
-─── Population (carrier) ──────────────────────────────────────────
+─── Population (substrate-owning lens) ──────────────────────────────
 pos              dir
 NotYetBorn       {beBorn}
 Alive            {age, die, emigrate, giveBirth, becomeVictim, …}
@@ -188,7 +194,7 @@ Counts (in `// …`) are read from the SCC-condensation diagram at [ideas/system
 
 ### 3.3 Future lenses (v2+)
 
-Education, employment, mental health, child protection, AOD will each be additional polynomials sharing the `Person` carrier. They wire to the justice pipeline via labelled directions (e.g. `Education.disengaged ⤿ Offending` rate multiplier).
+Education, employment, mental health, child protection, AOD will each be additional polynomials sharing the `Person` substrate. They wire to the justice pipeline via labelled directions (e.g. `Education.disengaged ⤿ Offending` rate multiplier).
 
 ## 4. System architecture
 
@@ -371,7 +377,9 @@ obs/
 | Parametric lens | A lens where forward/backward are parameterised by `θ`. |
 | Coalgebra | The actual stepper: `S → p(S)`, mapping a state to position + direction-handler. |
 | Wiring | A morphism identifying an output direction of one lens with an input direction of another. |
-| Carrier | Object passed through every lens unchanged (here: `Person`). |
+| Carrier (of a coalgebra) | Strict CT sense: the object `X` of an `F`-coalgebra `(X, c : X → F(X))`. Each lens has its own carrier (e.g. Police's is `Person × PoliceState`). |
+| Substrate / shared base | The factor every lens's carrier has in common (here: `Person`). What earlier loose usage called the "carrier". |
+| Behaviour-preserving morphism | Vertical morphism in the Libkind–Myers double category of systems. Each domain lens's carrier admits one to `Person`, given by projection. |
 | Rate kernel | `(person, state, θ) → RateVector(directions)`. |
 | Discretiser | Optic taking a rate kernel to a per-tick probability kernel for a given `Δt`. |
 | Hazard model | Time-in-state-aware rate kernel for non-memoryless states. |
