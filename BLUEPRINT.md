@@ -61,18 +61,67 @@ The backward leg can update `Θ`. Reading `forward` as *simulate* and `backward`
 
 ### 2.3 Wiring and operadic composition
 
-Coupling several systems (justice → employment etc.) is **operadic**: each subsystem is a 1-cell in a double category of systems whose horizontal composition is wiring, and whose vertical morphisms are behaviour-preserving morphisms. Reference: [Towards a double operadic theory of systems](theory-documents/Towards%20a%20double%20operadic%20theory%20of%20systems.pdf) (Libkind & Myers).
+Coupling several systems (Justice → Labour etc.) is **operadic**: each subsystem is a 1-cell in a double category of systems whose horizontal composition is wiring, and whose vertical morphisms are behaviour-preserving morphisms. Reference: [Towards a double operadic theory of systems](theory-documents/Towards%20a%20double%20operadic%20theory%20of%20systems.pdf) (Libkind & Myers).
 
-Concretely, a wiring is a *map of polynomials* that identifies an output direction of one lens with an input direction of another. In `obs`:
+#### 2.3.1 Parallel product on polynomials
+
+The monoidal product used for wiring is the **parallel product** `⊗` (often called the Dirichlet product):
 
 ```
-Offending.detected      ⟶  Police.becomeAlleged
-Police.courtAction      ⟶  Courts.charged
-Courts.handoffToCorrections ⟶ Corrections.intake
-Corrections.Released    ⤿  Population (next-tick recidivism modifier on Offending)
+(p ⊗ q).pos          := p.pos × q.pos
+(p ⊗ q).dir (i, j)   := p.dir i × q.dir j
 ```
 
-The `⤿` arrows are **lagged feedback**: they read this-tick state and write next-tick parameters, avoiding within-tick fixed points.
+Intuition: place `p` and `q` side by side, observed simultaneously. A position of `p ⊗ q` is *both* `p`'s and `q`'s current state; a direction at `(i, j)` is *both* a direction of `p` at `i` and a direction of `q` at `j`. Parallel product is associative and symmetric monoidal up to coherence iso, so `(A ⊗ B) ⊗ C ≅ A ⊗ (B ⊗ C)` — pair-wise design suffices for n-ary composition.
+
+#### 2.3.2 A wiring is a lens out of a parallel composite
+
+Given inner systems `p₁, …, pₙ` and an outer interface polynomial `q`, a **wiring diagram** is a lens
+
+```
+w : p₁ ⊗ … ⊗ pₙ  ⟶  q
+```
+
+Unpacked:
+
+```
+w.fwd  : p₁.pos × … × pₙ.pos → q.pos
+           "given the inner states, what does the outside see?"
+
+w.bwd  : (j ∈ inner positions) (d ∈ q.dir (w.fwd j)) → p₁.dir j₁ × … × pₙ.dir jₙ
+           "given an outside input direction, what direction does each inner system get?"
+```
+
+The backward leg does the routing — it is what synchronises inner systems on a shared joint transition. It can route an outer input into one inner system, route an inner output into another inner input (feedback), discard, broadcast, or merge.
+
+#### 2.3.3 Double operadic structure
+
+Pure operadic composition only changes interfaces. Sometimes you also want to change the *carrier* — replace a fine-grained system with a coarsened approximation, refine a stub into a full implementation, or quotient indistinguishable states. These are **behaviour-preserving morphisms**, the vertical arrows of the Libkind–Myers double category.
+
+| | role |
+|---|---|
+| Objects | interface polynomials |
+| Horizontal arrows | lenses (wirings) |
+| Vertical arrows | behaviour-preserving morphisms (carrier changes) |
+| 2-cells | wiring diagrams that commute with carrier changes |
+
+For `obs`, the vertical structure is exactly what makes §2.4 work: `Discretise(Δt) : RateLens → ProbLens` is a behaviour-preserving morphism — same interface, different carrier (continuous-time → discrete-time). The 2-cell coherence ensures that wiring composed systems and then discretising gives the same result as discretising each first and then wiring — which is the property that makes mixing abstraction levels safe.
+
+#### 2.3.4 Synchronous wiring vs lagged feedback
+
+Two distinct mechanisms couple lenses, both visible in the diagrams of [ideas/](ideas/):
+
+```
+Offending.detected      ⟶  Police.becomeAlleged          (synchronous)
+Police.courtAction      ⟶  Courts.charged                (synchronous)
+Courts.handoffToCorrections ⟶ Corrections.intake          (synchronous)
+Corrections.Released    ⤿  Offending (next-tick rate ↑)   (lagged)
+Labour.unemployed       ⤿  Offending (next-tick rate ↑)   (lagged)
+```
+
+The `⟶` arrows are **synchronous wirings**: a single joint direction fires inner directions in lockstep, encoded in `w.bwd` as above. The `⤿` arrows are **lagged feedback**: they read this-tick state and modify next-tick kernel parameters, avoiding within-tick fixed points. Lagged feedback is *not* in the wiring lens — it lives in kernel covariates.
+
+Concrete catalogue and worked example are in §3.4 and §3.5.
 
 ### 2.4 Continuous-time Markov chains with run-time discretisation
 
@@ -195,6 +244,203 @@ Counts (in `// …`) are read from the SCC-condensation diagram at [ideas/system
 ### 3.3 Future lenses (v2+)
 
 Education, employment, mental health, child protection, AOD will each be additional polynomials sharing the `Person` substrate. They wire to the justice pipeline via labelled directions (e.g. `Education.disengaged ⤿ Offending` rate multiplier).
+
+### 3.4 Combining lenses: catalogue and build order
+
+Wirings compose (§2.3.1), so the design exercise is per pair, not per n-tuple. Below is every pair that matters for `obs`, with the synchronous wire (the lens), the lagged feedback (kernel covariates), the Australian data needed, and rough effort.
+
+| Pair | Synchronous wire(s) | Lagged feedback | Data | Effort | Phase |
+|------|---------------------|------------------|------|--------|-------|
+| **Within Justice** | | | | | |
+| Offending ↔ Police | `Offending.detected(c)` ⟹ `Police.becomeAlleged(c)` | Diversion → reduced offending rate next tick | ABS Recorded Crime Offenders; AIC linkage | Low | v0 |
+| Police ↔ Courts | `Police.courtAction(c)` ⟹ `Courts.charged(c)` | Prior arrests as Courts covariate | ABS Criminal Courts (linked to police) | Low | v0 |
+| Courts ↔ Corrections | `Courts.handoffToCorrections(t)` ⟹ `Corrections.intake(t)` | Prior sentences as Courts covariate | Direct linkage; ABS, AIHW | Low | v0/v1 |
+| Offending ↔ Corrections (recidivism) | none direct (must route via Police) | `Released` ⤿ ↑ Offending rate; `Prisoner` ⤿ rate = 0 | AIHW prisoner returns; ROGS | Medium — identification of multiplier vs base rate is the standard recidivism problem | v1 |
+| **Justice ↔ outside** | | | | | |
+| Justice ↔ Labour | `intake(Custody)` ⟹ `Labour.forcedExitIncarceration`; `sentenceComplete`/`parole` ⟹ `Labour.forcedReentryUnemployed`; `parole_revoked` ⟹ `forcedExitIncarceration` | Unemployment ⤿ ↑ offending; recent justice contact ⤿ ↑ job-separation, ↓ find-job | LFS marginals; HILDA panel; **PLIDA** for linked admin (restricted) | Medium-high — wire is clean; calibration is data-bound | v3 |
+| Justice ↔ Education | `intake(Custody)` ⟹ `Education.forcedExitToCustody`; `parole`/`sentenceComplete` ⟹ optionally `Education.reentryAdult` | Low education ⤿ ↑ offending; justice contact ⤿ ↓ attainment | ACARA; NCVER VOCSTATS; PLIDA fragments | Medium — wire is clean; data is patchy outside PLIDA | v3 |
+| **Outside ↔ outside** | | | | | |
+| Education ↔ Labour | `Education.complete(level)` ⟹ `Labour.enterLF`; `jobSeparation` ⤿ optionally re-enrol | Education level as covariate of every Labour transition | NCVER; LFS; HILDA; ABS Education and Work | Low-medium — well-trodden | v3 |
+| **Population ↔ all** | | | | | |
+| Population ↔ each domain | `die` ⟹ `forcedTerminate`; `beBorn` ⟹ `forcedInitialise`; `emigrate` ⟹ `forcedSuspend`; `return` ⟹ `forcedReinstate` | Demographics as covariate of *every* kernel | ABS ERP; Births; Deaths; NOM | Low — abstract over a `Lifecycle` interface implemented by each lens | v1 |
+
+#### Two structural observations
+
+**Population is special.** Its wiring with every other lens has the same shape — the lifecycle hooks `{die, beBorn, emigrate, return}` synchronously force every domain lens into a terminal/initial/suspended state. Implement this once as a `Lifecycle` interface that each domain polynomial implements; the wiring with Population is then *generated*, not hand-written. Otherwise you'd write five copies of the same death-handling clauses.
+
+**Skip-link couplings are kernel-only, not wiring.** The polynomial chain forces flows through the intermediates (Police, Courts), so couplings like Offending ↔ Corrections (recidivism) have no direct synchronous wire to author. The coupling lives entirely as a parameter modifier on next-tick Offending rates, conditioned on this-tick Corrections state. This keeps the wiring layer small and turns the cross-system effect into a covariate cell in the per-edge MLE (§5).
+
+#### Recommended build order
+
+1. **v0** — Within-Justice (Offending → Police → Courts, Corrections stub). Static Population. No Labour, no Education. *Wires: 3.*
+2. **v1** — Full Corrections + recidivism kernel feedback. Real Population dynamics via the `Lifecycle` interface. *Wires: 4 within-Justice + 5 Population. Effort low because Lifecycle generates 4 of those.*
+3. **v3a** — Add Labour. Wire to Justice (4 wires: incarceration, release×2, revoke), wire to Population. Calibrate cross-system rates from HILDA + LFS first; PLIDA later if accessible. *Wires: ~5 new.*
+4. **v3b** — Add Education. Wire to Justice (1–2 wires), Labour (1 wire), Population. *Wires: ~3 new.*
+
+Total wires across the full system once you reach v3b: **15–18 hand-authored wires** plus the generic `Lifecycle` projection. The hard work is *kernel calibration*, not wiring topology.
+
+### 3.5 Worked example: wiring Justice and Labour
+
+This section makes §2.3 concrete by wiring a minimal Labour polynomial against the Justice composite. It's the smallest non-trivial cross-domain example and the template every later cross-domain wiring follows.
+
+#### 3.5.1 Labour polynomial
+
+```text
+─── Labour ──────────────────────────────────────────────────────────
+pos              dir
+NotInLF          { stay
+                 , enterLF
+                 , forcedReentryUnemployed   -- triggered externally
+                 }
+Employed         { stay
+                 , jobSeparation → Unemployed
+                 , retire → NotInLF
+                 , forcedExitIncarceration   -- triggered externally
+                 }
+Unemployed       { stay
+                 , findJob → Employed
+                 , discouraged → NotInLF
+                 , forcedExitIncarceration   -- triggered externally
+                 }
+─────────────────────────────────────────────────────────────────────
+calibrated against: ABS Labour Force Survey; HILDA for transitions
+```
+
+The `forced…` directions are the **ports** through which an external wiring drives Labour. Labour's own kernel assigns them rate zero. They fire only when an outer wiring lens routes a synchronous joint direction into them.
+
+#### 3.5.2 Parallel composite
+
+```text
+(Justice ⊗ Labour).pos      = Justice.pos × Labour.pos
+(Justice ⊗ Labour).dir(j,l) = Justice.dir(j) × Labour.dir(l)
+```
+
+The parallel composite is permissive — it includes illegal joint states like `(Prisoner, Employed)`. The wiring lens cuts these down.
+
+#### 3.5.3 Outer joint polynomial
+
+```text
+position                         meaning
+Free.NotInLF                     no justice contact, out of LF
+Free.Employed
+Free.Unemployed
+Defending.NotInLF                court process (pre-bail or on bail)
+Defending.Employed
+Defending.Unemployed
+Remanded                         on remand → must be NotInLF
+Incarcerated                     in prison  → must be NotInLF
+ServingCommunity.{NotInLF,Employed,Unemployed}
+OnParole.{NotInLF,Employed,Unemployed}
+```
+
+`Remanded` and `Incarcerated` collapse the labour dimension because labour state is deterministically `NotInLF` — the wiring constraint at the type level. Other joint positions retain both dimensions because labour state is genuinely independent.
+
+#### 3.5.4 The wiring lens
+
+```text
+w : Justice ⊗ Labour → Joint
+```
+
+**Forward** (positions → positions):
+
+```
+w.fwd (NotInJustice, Employed)    = Free.Employed
+w.fwd (Defendant,    Employed)    = Defending.Employed
+w.fwd (OnRemand,     NotInLF)     = Remanded
+w.fwd (Prisoner,     NotInLF)     = Incarcerated
+w.fwd (Parolee,      Unemployed)  = OnParole.Unemployed
+
+-- illegal: forward must still be total
+w.fwd (Prisoner,     Employed)    = ⊥
+w.fwd (OnRemand,     Employed)    = ⊥
+```
+
+`⊥` is unreachable if the dynamics are well-formed. In Lean we either return an `Option` or refine the inner state to exclude these.
+
+**Backward** (joint direction → inner direction pair). This is where synchronisation lives:
+
+```
+-- pure justice transition, no labour effect
+w.bwd (Defendant, Employed, "bail_granted_keep_job")
+  = ( Justice.bailGranted,                Labour.stay )
+
+-- pure labour transition while on bail
+w.bwd (OnBail,    Employed, "lose_job")
+  = ( Justice.continue,                   Labour.jobSeparation )
+
+-- INCARCERATION: ONE joint direction = TWO inner directions in lockstep
+w.bwd (Defendant, Employed, "sentenced_to_custody")
+  = ( Courts.handoffToCorrections(Custody),
+      Labour.forcedExitIncarceration )
+
+-- RELEASE
+w.bwd (Prisoner,  NotInLF,  "sentence_complete_release")
+  = ( Corrections.sentenceComplete,
+      Labour.forcedReentryUnemployed )
+
+-- PAROLE REVOCATION re-incarcerates
+w.bwd (Parolee,   Employed, "parole_revoked")
+  = ( Corrections.revoke,                 Labour.forcedExitIncarceration )
+```
+
+The wiring's job is exactly to say *"fire these two inner directions together when the outside requests this joint direction"*.
+
+#### 3.5.5 Worked transition — `Defending.Employed → Incarcerated`
+
+Tick `t`:
+1. Joint position is `Defending.Employed`. Joint kernel proposes joint direction `sentenced_to_custody` (with probability determined by trial outcome rates × custody rates, conditional on covariates).
+2. Wiring backward decomposes: `Courts.handoffToCorrections(Custody)` for Justice; `Labour.forcedExitIncarceration` for Labour.
+3. Inner systems each step in lockstep:
+   - Courts: `Defendant → Sentenced(Custody)`, then via internal Justice wiring, Corrections: `NotInCorrections → Prisoner`.
+   - Labour: `Employed → NotInLF[incarcerated]`.
+4. Joint position at tick `t+1` is `Incarcerated`. Forward of the wiring confirms `w.fwd(Prisoner, NotInLF) = Incarcerated`.
+
+Both inner systems advanced by one direction, in lockstep, driven by a single joint direction. That's the operadic content.
+
+#### 3.5.6 What the wiring is *not* for
+
+Synchronous coupling — incarceration forcing exit from labour force — is in the wiring. **Asynchronous feedback** is not:
+
+- *Unemployment raises offending probability.* Parameter effect: `λ_offending(person, t)` depends on `person.labour_state_{t−1}`. Offending kernel reads the substrate and adjusts. No wiring change.
+- *Recent criminal record raises job-separation rate.* `λ_jobSeparation(person, t)` depends on `person.justice_state_{t−1}`. Labour kernel reads, adjusts.
+
+Synchronous coupling lives in the wiring; cross-system *propensities* live in kernels and are calibrated as ordinary covariate effects (see §3.4 catalogue).
+
+#### 3.5.7 Implementation choice — joint kernel vs factored + wiring
+
+Two ways to actually code this:
+
+**Joint kernel.** One kernel table indexed by `(joint_pos, covariate_cell, joint_direction)`. Clean semantics; modest table size for a Joint with ~14 positions.
+
+**Factored kernel + wiring.** Each inner has its own kernel; the wiring resolves "if Justice fires `handoffToCorrections(Custody)`, force Labour to fire `forcedExitIncarceration`, regardless of what Labour's own kernel would have done". Cheaper to estimate; Labour's "ordinary" rates calibrate against ABS LFS unconditionally on justice state. Cross-system effects (e.g. job-separation conditional on bail status) live as covariate effects on the Labour kernel.
+
+**Choice for `obs`: factored + wiring.** Wiring expresses *deterministic* joint transitions (incarceration, release, revocation); kernels express *probabilistic* same-tick coupling via covariates. Matches the data shape — most flow data is per-system; linked-data sources estimate cross-system covariates.
+
+#### 3.5.8 IR shape for a wiring
+
+```json
+{
+  "wiring_id": "justice_x_labour",
+  "inner_lenses": ["justice", "labour"],
+  "outer_polynomial": "joint_jl",
+  "fwd_map": [
+    {"inner_pos": ["Prisoner", "NotInLF"],  "outer_pos": "Incarcerated"},
+    {"inner_pos": ["Defendant", "Employed"], "outer_pos": "Defending.Employed"}
+  ],
+  "bwd_map": [
+    {
+      "outer_dir": "sentenced_to_custody",
+      "outer_pos_pattern": ["Defendant", "*"],
+      "inner_dirs": {
+        "justice": "handoffToCorrections(Custody)",
+        "labour":  "forcedExitIncarceration"
+      }
+    }
+  ]
+}
+```
+
+The DuckDB compiler turns this into (a) constraint checks ensuring no person ever ends up at a `⊥` joint position, (b) a routing table the simulation step joins against to resolve sampled outer directions into inner direction pairs.
 
 ## 4. System architecture
 
