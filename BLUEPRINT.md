@@ -150,6 +150,118 @@ At entry to state `i`, draw the dwell time from the integrated hazard; at exit, 
 
 This is option **(b)** from the design discussion. It plays well with DuckDB by adding a single `time_entered_state` column to the per-person current-state table.
 
+### 2.6 Within-period dynamics and the additive trace
+
+§2.4 establishes that kernels emit *rates*, not per-tick probabilities, and §2.5 extends this to non-memoryless states via hazards. This subsection answers the operational question: how is the simulator actually stepped, and what role does the reporting period `Δt` play?
+
+#### 2.6.1 Two time-scales
+
+Two notions must be kept distinct:
+
+- **Continuous event time within a period.** The simulator is event-driven: each person's next transition has a time, sampled from the current state's hazard. Sampling, firing, and rescheduling happen in event-time, not on ticks.
+- **Reporting periods (`Δt`).** Quarterly, annual, monthly, or event (`Δt = 0`). These are observation windows over the event stream, used to summarise flows and stocks for calibration. Periods are *projections*, not simulation steps.
+
+The simulator does not advance "by period" — it advances by event. Periods enter only at the trace operator that produces a per-period observable from the event stream. This is the operational reading of the `system-lens-with-additive-trace.png` diagram in [ideas/](ideas/).
+
+#### 2.6.2 The per-lens additive trace
+
+For each lens `L`, define a `Trace` interface alongside the rate kernel:
+
+```text
+Trace_L :=
+  draw       : (state, person, t)        → (next_event_time, direction)
+  split      : direction                 → { continue | exit_to L' | period_boundary }
+  accumulate : (running_summary, event)  → running_summary           -- monoidal
+  emit       : running_summary           → per_period_observable
+```
+
+This is the categorical reading of the *additive trace*: a feedback operator on `p_L → p_L` that loops `draw → split → accumulate` until `split` returns either an inter-lens exit or a period-boundary signal, then `emit` projects the accumulator out as the lens's per-period observable.
+
+`accumulate` is the *additive* part. Its accumulator is required to be a (commutative) monoid — typically `(ℕ, +)` for direction counts, `(ℝ⁺, +)` for time-weighted state stocks, or vector-valued versions of these. "Additive" does not restrict the accumulator to a single number; it is only the structural requirement that combining events is associative and identity-respecting.
+
+The per-period observable is `emit ∘ fold(accumulate, events_in_period)` — this is what calibration data is compared against in §5.
+
+#### 2.6.3 Per-period topological sweep over the wiring DAG
+
+The synchronous-wire structure of §2.3 is a DAG (Offending → Police → Courts → Corrections; Population is the root via lifecycle wires). Lagged feedback `⤿` does not enter the DAG — it only modifies next-period kernel parameters. Within a period the DAG is therefore acyclic, and one topological sweep per period resolves all cascades:
+
+```text
+for each period [t, t + Δt):
+    for each lens L in topological_order(synchronous_wire_DAG):
+        for each person currently in L (carry-over) or arriving from upstream this period:
+            init: running_summary ← ε_L         -- monoid identity
+            repeat:
+                (event_time, direction) ← Trace_L.draw(person.state, person, t_current)
+                if event_time ≥ t + Δt:
+                    -- person remains in L at period boundary
+                    record_event(person, L, t + Δt, "carried_over")
+                    break
+                case Trace_L.split(direction):
+                    | continue:
+                          apply intra-L transition
+                          running_summary ← Trace_L.accumulate(running_summary, event)
+                          record_event(person, L, event_time, direction)
+                          continue loop                                -- the trace
+                    | exit_to L':
+                          push person onto L'.arrivals[t = event_time]
+                          record_event(person, L, event_time, direction)
+                          break
+                    | period_boundary:
+                          unreachable here (handled above)
+            persist Trace_L.emit(running_summary) into period summary
+```
+
+Properties:
+
+- **Within-period cascades resolve fully.** A person can transit `Police → Courts → Corrections` in one period because Courts processes after Police and picks up arrivals.
+- **No fixed-point iteration is needed.** The DAG is acyclic *for synchronous wires*. Recidivism (`Corrections.Released ⤿ Offending`) is lagged, so it never closes a within-period loop.
+- **The sweep is per period, but the dynamics inside are per event.** `Δt` enters only at the period-boundary check and the `emit`. The dynamics are scale-free.
+
+#### 2.6.4 Events table as the canonical artefact
+
+The simulator's primary output is an **events table**:
+
+```
+events(person_id, lens, event_time, from_state, direction, to_state, covariate_snapshot)
+```
+
+Every simulation artefact derives from this table:
+
+- *Per-period flows* — `GROUP BY period_bucket(event_time), lens, direction`.
+- *Per-period stocks* — `LAST_VALUE(state) OVER (PARTITION BY person_id ORDER BY event_time)` evaluated at period boundaries.
+- *Per-lens additive trace observables* — group-by per period plus the lens's `emit`.
+- *Calibration counts* (§5) — joined against observation tables.
+
+A separate "current state" table is maintained as a *cache* (for fast hazard lookups during simulation) but is always derivable from the events table. This makes the simulator's output reproducible, debuggable, and time-travelable: any past state can be reconstructed by replaying events up to a chosen time.
+
+#### 2.6.5 DuckDB implementation pattern
+
+The topological sweep maps to DuckDB as a per-period, per-lens, per-arrival-cohort vectorised step. The inner `repeat` loop becomes a small bounded iteration (typically one or two rounds because most paths through a single lens are short within one period):
+
+```sql
+-- one iteration of the inner trace, vectorised over a cohort
+WITH cohort AS (
+  SELECT person_id, state, time_entered_state, covariate_cell
+  FROM person_state WHERE lens = :L AND active_in_period(:t, :Δt)
+),
+hazards AS (
+  SELECT c.*, k.direction, k.lambda
+  FROM cohort c JOIN theta_:L k USING (state, covariate_cell)
+),
+sampled AS (
+  SELECT person_id,
+         :t + sample_event_time(SUM(lambda) OVER (PARTITION BY person_id), :Δt) AS event_time,
+         sample_direction(...) AS direction
+  FROM hazards GROUP BY person_id
+)
+INSERT INTO events
+SELECT person_id, :L, event_time, direction
+FROM sampled
+WHERE event_time < :t + :Δt;
+```
+
+Single global event queues popping events in absolute order are also implementable but fit DuckDB's set-based model worse — they require per-event Python round-trips. The per-period topological sweep is the recommended pattern for this project.
+
 ## 3. Domain model
 
 ### 3.1 Substrate: `Person`, owned by the Population lens
@@ -629,6 +741,11 @@ obs/
 | Rate kernel | `(person, state, θ) → RateVector(directions)`. |
 | Discretiser | Optic taking a rate kernel to a per-tick probability kernel for a given `Δt`. |
 | Hazard model | Time-in-state-aware rate kernel for non-memoryless states. |
+| Additive trace | The `(draw, split, accumulate, emit)` operator on each lens that folds within-period events into a per-period observable; categorically, a trace on `p_L → p_L`. |
+| Trace accumulator | The (commutative) monoid in which the trace's per-event fold lives — typically counts or time-weighted state stocks. |
+| Topological sweep | One pass per period over the synchronous-wire DAG of lenses, processing each lens once in dependency order. |
+| Events table | Canonical simulator output: one row per fired transition, keyed by `(person_id, lens, event_time, direction)`. All other artefacts (stocks, flows, period summaries) are derived. |
+| Reporting period (`Δt`) | Observation window over the event stream; enters the simulator only at the period-boundary check and at `emit`. |
 | IR | The JSON intermediate representation between Lean and DuckDB. |
 | Cell | A combination of covariate values that indexes parameter rows. |
 
