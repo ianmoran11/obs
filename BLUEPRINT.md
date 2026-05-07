@@ -554,6 +554,145 @@ Two ways to actually code this:
 
 The DuckDB compiler turns this into (a) constraint checks ensuring no person ever ends up at a `⊥` joint position, (b) a routing table the simulation step joins against to resolve sampled outer directions into inner direction pairs.
 
+### 3.6 Marginal-schema olog: the common ground for calibration
+
+Calibration compares simulator output against published aggregate statistics. To make that comparison precise we need an explicit, typed schema for "what a comparable summary looks like". This subsection defines that schema as a Spivak-style **olog** — a small finitely-presented category whose objects are types and whose arrows are functional aspects (Spivak & Kent, *PLoS ONE* 2012). Both the simulator and the empirical data are realised as instances of this olog via schema morphisms; calibration loss is computed at the olog level.
+
+#### 3.6.1 Three ologs
+
+Three schemas are involved in calibration.
+
+- **`S_sim`** — the simulator schema. Types include `[a person]`, `[an event]`, `[a position]`, `[a direction]`, `[a covariate cell]`. The events table (§2.6.4) is an instance `I_sim : S_sim → Set`.
+- **`S_emp,k`** for each empirical source `k` — one olog per source (ABS Recorded Crime, ABS Criminal Courts, AIHW Prisoners, AIC, ROGS, etc.). Types reflect what the source actually publishes; instances `I_emp,k : S_emp,k → Set` are the loaded tables.
+- **`M`** — the **marginal-schema olog**. The lingua franca for calibration. Types include `[a person]`, `[indigenous status]`, `[corrections status]`, `[age band]`, `[a period]`, `[a transition count cell]`. Aspects connect them — see §3.6.4 for the v0 starter set.
+
+#### 3.6.2 Schema morphisms
+
+The marginal-schema olog `M` is connected to the simulator and to each empirical source via schema morphisms:
+
+```text
+        Φ              Ψ_k
+   M  ─────►  S_sim     M  ─────►  S_emp,k     for each empirical source k
+```
+
+`Φ` says how a marginal-schema concept is realised inside the simulator schema. `Ψ_k` says the same for empirical source `k`. For example:
+
+- `[a person] –has corrections status–> [corrections position]` in `M` realises in `S_sim` as: latest event in events table per person, restricted to `lens = 'corrections'`, projected to its `to_state` field.
+- The same aspect realises in `S_aihw_prisoners` as: a row's `position` column from a stock-snapshot table.
+
+The morphisms are typed mappings between schemas. Composition checks (path equivalences from `M` to either side) make these mappings *testable*.
+
+#### 3.6.3 Calibration as comparison in `Inst(M)`
+
+The Δ-pullback (functorial data migration; Spivak's *FDM*) ferries instances along schema morphisms in the *opposite* direction:
+
+$$ I_M^{\mathrm{sim}} \;:=\; \Delta_\Phi(I_{\mathrm{sim}}) \qquad I_M^{\mathrm{emp},k} \;:=\; \Delta_{\Psi_k}(I_{\mathrm{emp},k}) $$
+
+Both are instances of the *same* schema `M`. Calibration loss is then a divergence between two instances of `M`:
+
+$$ \mathcal{L} \;=\; d\big(I_M^{\mathrm{sim}},\; I_M^{\mathrm{emp},k}\big) $$
+
+for some chosen divergence (KL, χ², Hellinger). The categorical content is: *both sides of the comparison are typed at the marginal-schema level*, and the typing is enforced by the schema morphisms.
+
+For seed-population synthesis (§6.1), the right Kan extension `Π_Ψ` gives the most-restrictive simulator-schema instance compatible with observed marginals — categorically, this is what IPF computes.
+
+#### 3.6.4 The marginal-schema olog for v0
+
+Starter set, sufficient for the v0 vertical slice (Population + Offending + Police + Courts):
+
+```text
+─── Marginal-schema olog M (v0) ─────────────────────────────────────
+[a person]               –has indigenous status–>  [indigenous status]
+[a person]               –has age band–>           [age band]
+[a person]               –has sex–>                [sex]
+[a person]               –has region class–>       [region class]
+[a person]               –has police status–>      [police position]
+[a person]               –has courts status–>      [courts position]
+
+[a transition count cell] –is over period–>          [a period]
+[a transition count cell] –is for lens–>             [a lens]
+[a transition count cell] –is for from-state–>       [a position]
+[a transition count cell] –is for to-direction–>     [a direction]
+[a transition count cell] –is for covariate cell–>   [a covariate cell]
+[a transition count cell] –has count–>               [a non-negative integer]
+
+[a covariate cell] –has age band–>          [age band]
+[a covariate cell] –has sex–>               [sex]
+[a covariate cell] –has indigenous status–> [indigenous status]
+[a covariate cell] –has region class–>      [region class]
+
+[a stock-snapshot cell]  –is at time–>          [an instant]
+[a stock-snapshot cell]  –is for lens–>         [a lens]
+[a stock-snapshot cell]  –is for position–>     [a position]
+[a stock-snapshot cell]  –is for covariate cell–> [a covariate cell]
+[a stock-snapshot cell]  –has count–>           [a non-negative integer]
+─────────────────────────────────────────────────────────────────────
+Commutativity: the obvious aggregation diagrams
+  e.g. for any [a covariate cell], its component aspects must agree
+       with the corresponding aspects of [a person] under aggregation.
+```
+
+This olog is small, but it captures every calibration target the v0 slice cares about: per-cell flow counts, per-cell stock counts, and the demographic axes along which both are sliced.
+
+#### 3.6.5 Implementation approach
+
+Two principles.
+
+**Make `M` formal; keep `S_emp,k` informal.**
+
+- `M` and `Φ : M → S_sim` are encoded in Lean alongside the polynomial-functor IR (§4.1, Layer 2). Each type becomes a Lean type; each aspect becomes a function; each commutativity equation becomes a stated `theorem` (proof deferred to v5, alongside other proofs).
+- `Ψ_k : M → S_emp,k` is encoded informally as a Python module that knows how to load source `k` and project it to `Inst(M)`. Promote individual `Ψ_k` to formal Lean morphisms only when source-specific pain forces it.
+
+**Generate DuckDB views from the schema morphisms.**
+
+For each schema morphism, the compiler emits a SQL view producing the marginal-schema instance:
+
+```sql
+CREATE VIEW marginal_from_simulator AS  -- Δ_Φ(I_sim)
+  SELECT person_id, indigenous_status, age_band, sex, region_class,
+         <latest police position>, <latest courts position>
+  FROM person_state JOIN events ...;
+
+CREATE VIEW marginal_from_abs_courts AS  -- Δ_Ψ_abs(I_abs_courts)
+  SELECT cell_key, period, count
+  FROM abs_courts_table;
+```
+
+The calibration loss is then a `JOIN` across these views per per-lens cell. The conjugate-update query of §5.1 / §5.2 is unchanged in shape — it just sources its `count` column from `marginal_from_abs_courts` rather than from a hand-prepared table, with the projection guaranteed correct by the schema morphism.
+
+#### 3.6.6 Categorical fit with the rest of the architecture
+
+Three places this slots cleanly into the existing apparatus.
+
+**(1) Modularity (§5.3 / Module 9.4) sharpens.** `M` factors as a wide pullback over `[a person]`:
+
+$$ M \;\cong\; M_{\mathrm{Pop}} \times_{[\text{a person}]} M_{\mathrm{Off}} \times_{[\text{a person}]} M_{\mathrm{Pol}} \times_{[\text{a person}]} \cdots $$
+
+Each lens contributes its own marginal sub-olog; they share only the `[a person]` substrate. Calibration is independent across factors because Δ distributes over the wide pullback. This is the categorical reason "five independent DuckDB queries" works.
+
+**(2) Substrate (§3.1) is an olog fragment.** The fibration `π : ⨿_L S_L → Person` corresponds to the small `M` fragment with type `[a person]` plus the per-lens position type and the aspect `–has L status–>`. The fibration view is one slice of `M`.
+
+**(3) Cross-source disagreement becomes commutativity failure.** When ABS Criminal Courts and AIHW Prisoners disagree on a quantity that *both* sources should report (e.g. people sentenced to custody in 2023), the diagram
+
+$$ I_{\mathrm{abs}} \;\xleftarrow{\Psi_{\mathrm{abs}}}\; M \;\xrightarrow{\Psi_{\mathrm{aihw}}}\; I_{\mathrm{aihw}} $$
+
+fails to commute on a particular path. The olog framework makes the disagreement *visible* and gives a place to record the reconciliation choice (which source to trust, on which cell, with what justification).
+
+#### 3.6.7 What's deferred
+
+- **Formalising `S_emp,k` ologs.** The empirical-source schemas are kept informal in v1. Promote them when a source change breaks more than one downstream query.
+- **AQL / CQL tooling.** Wisnesky's Categorical Query Language directly implements ologs + functorial data migration. Adoption deferred indefinitely — categorical content is the goal, not the specific tool.
+- **Π and Σ migrations.** v1 uses Δ exclusively (marginalisation). The right Kan `Π` enters at seed-population synthesis (§6.1). The left Kan `Σ` is unused for now; could appear if we ever need to extrapolate sparse marginals to a fuller schema.
+- **Commutativity proofs in Lean.** The diagrams are stated but unproved in v1, consistent with the typed-DSL-only Lean posture (§7).
+
+#### 3.6.8 Why this is worth doing
+
+Three concrete payoffs the rest of the architecture does not already provide.
+
+1. An explicit, typed artefact for "what we calibrate against". Currently implicit (column-name conventions across DuckDB). Becomes a first-class file.
+2. Source-to-marginal mappings as commit-able, reviewable code. When a source reissues a series with a new layout, you rewrite one Ψ rather than scatter changes across queries.
+3. Diagram-commutativity as unit tests. "Total over indigenous status equals total people" is a categorical equation that can be auto-checked rather than visually verified.
+
 ## 4. System architecture
 
 ### 4.1 Four layers
@@ -642,6 +781,8 @@ Person-time is reconstructed from stock × window when only flow + snapshot data
 
 Five independent calibration queries — one per lens factor of `θ`. Cross-lens couplings (e.g. recidivism multipliers) are calibrated separately as a pseudo-MLE over simulator output vs observed cohort outcomes, after the per-lens factors are pinned.
 
+The data on each side of the comparison (simulator output vs observed) is typed at the marginal-schema olog level (§3.6). Both sides project to `Inst(M)` via Δ-pullback; the conjugate-update SQL of §5.1 / §5.2 sources its `count` column from the resulting views. The categorical reason the per-lens decomposition holds is that `M` factors as a wide pullback over `[a person]` (§3.6.6); the per-lens factors of `θ` correspond to the per-lens factors of `M`.
+
 ### 5.4 Why the parametric-lens framing matters
 
 The lens type signature `(forward = simulate, backward = D → θ̂)` says nothing about *what's inside* `backward`. v1 backward = closed-form MLE. v2 candidates: hierarchical / partial-pooling fits via PyMC or Stan; gradient-step calibration via JAX (requires moving the simulator to JAX); ABC for likelihood-free targets. The forward simulator and the IR never change.
@@ -687,18 +828,26 @@ obs/
 │       ├── Police.lean
 │       ├── Courts.lean
 │       ├── Corrections.lean
-│       └── Wiring.lean          -- the cross-lens wirings, root spec
+│       ├── Wiring.lean          -- the cross-lens wirings, root spec
+│       ├── Olog.lean            -- Olog type + schema-morphism shape (§3.6)
+│       └── MarginalSchema.lean  -- the marginal-schema olog M and Φ : M → S_sim
 ├── ir/
-│   └── schema.json              -- IR JSON Schema
+│   ├── schema.json              -- IR JSON Schema
+│   └── marginal_schema.json     -- emitted M and Φ definitions (§3.6)
 ├── compiler/
 │   ├── pyproject.toml
 │   └── obs_compiler/
 │       ├── ir.py                -- pydantic models matching schema
 │       ├── duckdb_emit.py       -- IR → DDL + SQL macros
+│       ├── marginal_emit.py     -- marginal-schema IR → SQL views (§3.6)
 │       ├── calibrate.py         -- per-lens MLE queries
 │       └── driver.py            -- run loop
+├── empirical/
+│   ├── abs_courts.py            -- Ψ_abs : M → S_abs_courts (informal in v1)
+│   ├── aihw_prisoners.py        -- Ψ_aihw : M → S_aihw_prisoners
+│   └── ...                      -- one Ψ per source
 ├── seed/
-│   └── seed_population.py       -- ABS TableBuilder + IPF
+│   └── seed_population.py       -- ABS TableBuilder + IPF (Π_Ψ for the seed-marginal schema)
 ├── data/
 │   ├── raw/                     -- ABS/AIHW/AIC/ROGS extracts
 │   └── derived/                 -- transition counts, person-time
@@ -746,6 +895,11 @@ obs/
 | Topological sweep | One pass per period over the synchronous-wire DAG of lenses, processing each lens once in dependency order. |
 | Events table | Canonical simulator output: one row per fired transition, keyed by `(person_id, lens, event_time, direction)`. All other artefacts (stocks, flows, period summaries) are derived. |
 | Reporting period (`Δt`) | Observation window over the event stream; enters the simulator only at the period-boundary check and at `emit`. |
+| Olog | Spivak/Kent ontology log: a finitely-presented category whose objects are types (boxes labelled by noun phrases) and arrows are functional aspects (verb-phrase labels), with commutativity equations. |
+| Marginal-schema olog (`M`) | The common-ground olog used for calibration: types like `[a person]`, `[a transition count cell]`, `[a stock-snapshot cell]` plus aspects connecting them to demographic and per-lens position types. |
+| Schema morphism (`Φ`, `Ψ`) | A typed mapping between ologs; in `obs`, `Φ : M → S_sim` from marginal schema to simulator schema, and `Ψ_k : M → S_emp,k` for each empirical source. |
+| Δ-pullback | Functorial data migration along a schema morphism; produces an `M`-instance from a larger-schema instance. The categorical version of marginalisation. |
+| Π / Σ migrations | Right and left Kan extensions along a schema morphism. `Π` is used for seed-population synthesis (IPF); `Σ` is unused in v1. |
 | IR | The JSON intermediate representation between Lean and DuckDB. |
 | Cell | A combination of covariate values that indexes parameter rows. |
 
@@ -754,6 +908,8 @@ obs/
 - Spivak, Niu — *Polynomial Functors: A Mathematical Theory of Interaction* — [PDF](theory-documents/Polynomial%20Functors_%20A%20Mathematical%20Theory%20of%20Interaction.pdf).
 - Gavranović — *Fundamental Components of Deep Learning: A category-theoretic approach* — [PDF](theory-documents/Fundamental%20Components%20of%20Deep%20Learning.pdf).
 - Libkind, Myers — *Towards a double operadic theory of systems* — [PDF](theory-documents/Towards%20a%20double%20operadic%20theory%20of%20systems.pdf).
+- Spivak, Kent — *Ologs: A Categorical Framework for Knowledge Representation* — *PLoS ONE* 7(1):e24274, 2012. The marginal-schema olog of §3.6 follows this framework.
+- Spivak — *Functorial Data Migration* — arXiv:1009.1166, 2010. Source for the Δ / Π / Σ migrations underpinning §3.6.
 - Diagrams in [ideas/](ideas/) — informal but load-bearing visualisations of the parametric lens, additive trace, parameter updating, combined simulation+update, and the SCC-condensation of the AU justice flow.
 - Australian data sources: ABS Estimated Resident Population, Census, Recorded Crime, Criminal Courts Australia, Crime Victimisation Survey; AIHW Prisoners in Australia; AIC; ROGS Corrective Services / Police / Courts; NCVER VOCSTATS; DEWR labour-market data.
 
@@ -768,6 +924,9 @@ These are deliberately deferred and should be revisited at the noted phase.
 - **Cohort vs period accounting.** Some Australian publications report period (financial-year flows), some report cohort (offenders followed through outcomes). Reconciliation matters for MLE and is fiddly — flagged for v1.
 - **Lean → IR ergonomics.** The exact `ToJson` derivation strategy for dependent `pos`/`dir` types. Likely sum-out dependent positions before serialising (the `Sentenced(t)` discussion).
 - **Privacy posture beyond home use.** TableBuilder perturbation is enough now. If the project is ever shared as a tool with seed populations attached, revisit DP.
+- **Marginal-schema olog scope (§3.6).** v0 covers Population + Police + Courts. Extend `M` as Offending, Corrections, Labour, Education are added — open question whether to grow `M` monolithically or factor it as a colimit of per-lens sub-ologs glued along `[a person]`.
+- **Empirical-source ologs.** Currently `Ψ_k : M → S_emp,k` is informal Python. Promote to formal Lean morphisms when source-specific schema churn forces it.
+- **Cross-source reconciliation.** When two empirical sources give incompatible `M`-instances (e.g. ABS vs AIHW disagreement on custody counts), the diagram fails to commute. Need an explicit per-cell reconciliation policy — flagged but unresolved.
 
 ## 11. Out of scope for v1
 
