@@ -39,6 +39,13 @@ It exercises the PRNG, the Dirichlet conjugate update (including naturality),
 the cross-lens wirings, the marginal-schema aggregation, the calibration
 round-trip on a synthetic events list, and the lens polynomial structure.
 
+## Companion book
+
+Long-form prose explanation of every module — with mathematical notation,
+diagrams, and the full bodies of the relevant Lean functions — lives in
+[`book/index.md`](book/index.md). It renders cleanly on GitHub, including
+math (rendered with MathJax) and Mermaid diagrams.
+
 ## Module → file map
 
 | Module | File | What it implements |
