@@ -29,35 +29,36 @@ Each subsystem is a four-port parametric lens. Parameters enter from
 the top, state from the left, observables and feedback travel along
 the right edge, and updated parameters exit at the bottom.
 
-```mermaid
-flowchart TB
-    classDef port fill:#fff,stroke:#000,stroke-width:1px
-    classDef block fill:#eee,stroke:#000,stroke-width:1px
-    classDef copy fill:#000,stroke:#000,color:#fff
-
-    theta_in(["θ"]):::port
-    S_in(["S_t"]):::port
-    T_out(["T_t"]):::port
-    T_obs(["T_t+1"]):::port
-    S_next(["S_t+1"]):::port
-    theta_out(["θ"]):::port
-
-    subgraph LENS["parametric lens"]
-        direction TB
-        copy(("●")):::copy
-        pi1["π₁"]:::block
-        upd["updateSys"]:::block
-        copy --> pi1
-        copy --> upd
-    end
-
-    theta_in --> pi1
-    S_in --> copy
-    pi1 --> T_out
-    T_obs --> upd
-    upd --> S_next
-    upd --> theta_out
-```
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 340" width="440" height="340">
+  <defs>
+    <marker id="arr1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="black"/>
+    </marker>
+  </defs>
+  <text x="220" y="28" font-family="Georgia, serif" font-size="20" font-weight="bold" text-anchor="middle">System Parametric Lens</text>
+  <rect x="100" y="100" width="240" height="80" fill="#dcdcdc" stroke="black"/>
+  <rect x="100" y="180" width="240" height="80" fill="#b8b8b8" stroke="black"/>
+  <rect x="240" y="125" width="60" height="30" fill="white" stroke="black"/>
+  <text x="270" y="146" font-family="Georgia, serif" font-size="14" text-anchor="middle">π₁</text>
+  <rect x="140" y="205" width="120" height="30" fill="white" stroke="black"/>
+  <text x="200" y="225" font-family="Georgia, serif" font-size="13" font-style="italic" text-anchor="middle">update<tspan baseline-shift="sub" font-size="9" font-style="normal">sys</tspan></text>
+  <text x="220" y="65" font-family="Georgia, serif" font-size="17" font-style="italic" text-anchor="middle">θ</text>
+  <line x1="220" y1="72" x2="220" y2="98" stroke="black" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <text x="60" y="144" font-family="Georgia, serif" font-size="14" font-style="italic" text-anchor="end">S<tspan baseline-shift="sub" font-size="10" font-style="normal">t</tspan></text>
+  <line x1="68" y1="140" x2="98" y2="140" stroke="black" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <circle cx="155" cy="140" r="4" fill="black"/>
+  <line x1="159" y1="140" x2="238" y2="140" stroke="black" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <line x1="155" y1="144" x2="155" y2="203" stroke="black" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <text x="165" y="175" font-family="Georgia, serif" font-size="13" font-style="italic">S<tspan baseline-shift="sub" font-size="9" font-style="normal">t</tspan></text>
+  <line x1="300" y1="140" x2="370" y2="140" stroke="black" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <text x="386" y="144" font-family="Georgia, serif" font-size="14" font-style="italic">T<tspan baseline-shift="sub" font-size="10" font-style="normal">t</tspan></text>
+  <text x="386" y="224" font-family="Georgia, serif" font-size="14" font-style="italic">T<tspan baseline-shift="sub" font-size="10" font-style="normal">t+1</tspan></text>
+  <line x1="378" y1="220" x2="262" y2="220" stroke="black" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <line x1="138" y1="220" x2="70" y2="220" stroke="black" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <text x="60" y="224" font-family="Georgia, serif" font-size="14" font-style="italic" text-anchor="end">S<tspan baseline-shift="sub" font-size="10" font-style="normal">t+1</tspan></text>
+  <line x1="200" y1="237" x2="200" y2="295" stroke="black" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <text x="200" y="315" font-family="Georgia, serif" font-size="17" font-style="italic" text-anchor="middle">θ</text>
+</svg>
 
 > [!note] What each port is
 >
@@ -83,64 +84,81 @@ edges. The cross-system rules — wirings — travel along a horizontal
 channel in the *forward* half of the diagram, shown as the dashed
 arrows pointing into Labour's `wirings` node.
 
-```mermaid
-flowchart LR
-    classDef port fill:#fff,stroke:#000,stroke-width:1px
-    classDef block fill:#eee,stroke:#000,stroke-width:1px
-    classDef copy fill:#000,stroke:#000,color:#fff
-    classDef wire fill:#ffe,stroke:#a80,stroke-width:1px,stroke-dasharray:4 2
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 380" width="900" height="380">
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="black"/>
+    </marker>
+    <marker id="arrW" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#a06600"/>
+    </marker>
+  </defs>
+  <text x="450" y="28" font-family="Georgia, serif" font-size="20" font-weight="bold" text-anchor="middle">Justice ⊗ Labour</text>
 
-    theta_J(["θ_J"]):::port
-    S_J_in(["S_J,t"]):::port
-    S_J_next(["S_J,t+1"]):::port
-    E_J(["E_J"]):::port
-    E_J_obs(["E_J,obs"]):::port
-    theta_J_out(["θ_J"]):::port
+  <!-- JUSTICE -->
+  <rect x="80" y="100" width="240" height="80" fill="#dcdcdc" stroke="black"/>
+  <rect x="80" y="180" width="240" height="80" fill="#b8b8b8" stroke="black"/>
+  <text x="92" y="93" font-family="Georgia, serif" font-size="12" font-weight="bold">JUSTICE</text>
+  <rect x="225" y="125" width="65" height="30" fill="white" stroke="black"/>
+  <text x="257" y="146" font-family="Georgia, serif" font-size="13" text-anchor="middle">π<tspan baseline-shift="sub" font-size="9">1,J</tspan></text>
+  <rect x="115" y="205" width="120" height="30" fill="white" stroke="black"/>
+  <text x="175" y="225" font-family="Georgia, serif" font-size="12" font-style="italic" text-anchor="middle">update<tspan baseline-shift="sub" font-size="8" font-style="normal">J</tspan></text>
 
-    subgraph Justice["JUSTICE"]
-        direction TB
-        copyJ(("●")):::copy
-        piJ["π₁_J"]:::block
-        updJ["update_J"]:::block
-        copyJ --> piJ
-        copyJ --> updJ
-    end
+  <text x="200" y="65" font-family="Georgia, serif" font-size="15" font-style="italic" text-anchor="middle">θ<tspan baseline-shift="sub" font-size="10" font-style="normal">J</tspan></text>
+  <line x1="200" y1="72" x2="200" y2="98" stroke="black" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="40" y="144" font-family="Georgia, serif" font-size="13" font-style="italic" text-anchor="end">S<tspan baseline-shift="sub" font-size="9" font-style="normal">J,t</tspan></text>
+  <line x1="48" y1="140" x2="78" y2="140" stroke="black" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <circle cx="140" cy="140" r="4" fill="black"/>
+  <line x1="144" y1="140" x2="223" y2="140" stroke="black" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <line x1="140" y1="144" x2="140" y2="203" stroke="black" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="148" y="175" font-family="Georgia, serif" font-size="11" font-style="italic">S<tspan baseline-shift="sub" font-size="8" font-style="normal">J,t</tspan></text>
+  <line x1="290" y1="140" x2="336" y2="140" stroke="black" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="313" y="132" font-family="Georgia, serif" font-size="11" font-style="italic" text-anchor="middle">E<tspan baseline-shift="sub" font-size="8" font-style="normal">J</tspan></text>
+  <text x="346" y="224" font-family="Georgia, serif" font-size="11" font-style="italic" text-anchor="end">E<tspan baseline-shift="sub" font-size="8" font-style="normal">J,obs</tspan></text>
+  <line x1="340" y1="220" x2="237" y2="220" stroke="black" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <line x1="113" y1="220" x2="48" y2="220" stroke="black" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="40" y="224" font-family="Georgia, serif" font-size="13" font-style="italic" text-anchor="end">S<tspan baseline-shift="sub" font-size="9" font-style="normal">J,t+1</tspan></text>
+  <line x1="175" y1="237" x2="175" y2="295" stroke="black" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="175" y="315" font-family="Georgia, serif" font-size="15" font-style="italic" text-anchor="middle">θ<tspan baseline-shift="sub" font-size="10" font-style="normal">J</tspan></text>
 
-    subgraph Labour["LABOUR"]
-        direction TB
-        copyL(("●")):::copy
-        wire["wirings"]:::wire
-        piL["π₁_L"]:::block
-        updL["update_L"]:::block
-        copyL --> wire
-        wire --> piL
-        copyL --> updL
-    end
+  <!-- LABOUR -->
+  <rect x="560" y="100" width="240" height="80" fill="#dcdcdc" stroke="black"/>
+  <rect x="560" y="180" width="240" height="80" fill="#b8b8b8" stroke="black"/>
+  <text x="572" y="93" font-family="Georgia, serif" font-size="12" font-weight="bold">LABOUR</text>
+  <rect x="625" y="125" width="60" height="30" fill="#fff2d9" stroke="#a06600" stroke-width="1.2" stroke-dasharray="4 2"/>
+  <text x="655" y="146" font-family="Georgia, serif" font-size="12" text-anchor="middle">wirings</text>
+  <rect x="705" y="125" width="65" height="30" fill="white" stroke="black"/>
+  <text x="737" y="146" font-family="Georgia, serif" font-size="13" text-anchor="middle">π<tspan baseline-shift="sub" font-size="9">1,L</tspan></text>
+  <rect x="595" y="205" width="120" height="30" fill="white" stroke="black"/>
+  <text x="655" y="225" font-family="Georgia, serif" font-size="12" font-style="italic" text-anchor="middle">update<tspan baseline-shift="sub" font-size="8" font-style="normal">L</tspan></text>
 
-    theta_L(["θ_L"]):::port
-    S_L_in(["S_L,t"]):::port
-    S_L_next(["S_L,t+1"]):::port
-    E_L(["E_L"]):::port
-    E_L_obs(["E_L,obs"]):::port
-    theta_L_out(["θ_L"]):::port
+  <text x="680" y="65" font-family="Georgia, serif" font-size="15" font-style="italic" text-anchor="middle">θ<tspan baseline-shift="sub" font-size="10" font-style="normal">L</tspan></text>
+  <line x1="680" y1="72" x2="680" y2="98" stroke="black" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="520" y="144" font-family="Georgia, serif" font-size="13" font-style="italic" text-anchor="end">S<tspan baseline-shift="sub" font-size="9" font-style="normal">L,t</tspan></text>
+  <line x1="528" y1="140" x2="558" y2="140" stroke="black" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <circle cx="610" cy="140" r="4" fill="black"/>
+  <line x1="614" y1="140" x2="623" y2="140" stroke="black" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <line x1="685" y1="140" x2="703" y2="140" stroke="black" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <line x1="610" y1="144" x2="610" y2="203" stroke="black" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="618" y="175" font-family="Georgia, serif" font-size="11" font-style="italic">S<tspan baseline-shift="sub" font-size="8" font-style="normal">L,t</tspan></text>
+  <line x1="770" y1="140" x2="822" y2="140" stroke="black" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="836" y="144" font-family="Georgia, serif" font-size="13" font-style="italic">E<tspan baseline-shift="sub" font-size="9" font-style="normal">L</tspan></text>
+  <text x="836" y="224" font-family="Georgia, serif" font-size="13" font-style="italic">E<tspan baseline-shift="sub" font-size="9" font-style="normal">L,obs</tspan></text>
+  <line x1="828" y1="220" x2="717" y2="220" stroke="black" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <line x1="593" y1="220" x2="528" y2="220" stroke="black" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="520" y="224" font-family="Georgia, serif" font-size="13" font-style="italic" text-anchor="end">S<tspan baseline-shift="sub" font-size="9" font-style="normal">L,t+1</tspan></text>
+  <line x1="655" y1="237" x2="655" y2="295" stroke="black" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="655" y="315" font-family="Georgia, serif" font-size="15" font-style="italic" text-anchor="middle">θ<tspan baseline-shift="sub" font-size="10" font-style="normal">L</tspan></text>
 
-    theta_J --> piJ
-    S_J_in --> copyJ
-    piJ --> E_J
-    E_J_obs --> updJ
-    updJ --> S_J_next
-    updJ --> theta_J_out
+  <!-- Wiring channels (dashed, amber) -->
+  <!-- Event wiring: arcs over the top from E_J line to wirings top -->
+  <path d="M 313 130 L 313 78 L 655 78 L 655 122" stroke="#a06600" stroke-width="1.5" stroke-dasharray="4 2" fill="none" marker-end="url(#arrW)"/>
+  <text x="455" y="72" font-family="Georgia, serif" font-size="11" fill="#a06600" text-anchor="middle">event wiring (E_J)</text>
 
-    theta_L --> piL
-    S_L_in --> copyL
-    piL --> E_L
-    E_L_obs --> updL
-    updL --> S_L_next
-    updL --> theta_L_out
-
-    piJ -. "event wiring" .-> wire
-    copyJ -. "state wiring" .-> wire
-```
+  <!-- State wiring: arcs under the bottom from copy_J downward line to wirings bottom -->
+  <path d="M 140 180 L 140 340 L 655 340 L 655 158" stroke="#a06600" stroke-width="1.5" stroke-dasharray="4 2" fill="none" marker-end="url(#arrW)"/>
+  <text x="455" y="356" font-family="Georgia, serif" font-size="11" fill="#a06600" text-anchor="middle">state wiring (S_J,t)</text>
+</svg>
 
 > [!tip]
 > The wiring channel only appears in the **top half** of the diagram.
