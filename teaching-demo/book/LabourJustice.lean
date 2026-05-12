@@ -2,7 +2,9 @@
 
   A standalone teaching file. We model the labour-market and prison
   example as **polynomial functors and their coalgebras**, with parallel
-  composition by tensor and cross-system constraints by wirings.
+  composition by tensor and cross-system constraints by *wirings*
+  expressed as a **separate, composable algebraic object** that acts on
+  coalgebras by post-processing the next-state function.
 
   Polynomial functors play the role of "labelled state machine":
   positions are the states a system can be in, and each position has a
@@ -10,9 +12,15 @@
   on a carrier `S` is a step function `S → Σᵢ (Dir i → S)` — at every
   state, name a position and supply a next-state per direction.
 
+  The wirings are not buried inside the joint coalgebra. They live in
+  their own type `Wiring p S`, form a monoid under composition, and
+  *act* on coalgebras via `Coalgebra.wire`. This is the categorical
+  "addition" you asked for: wirings are first-class data, separate
+  from the raw parallel coalgebra, and applying them is a typed
+  operation rather than an inline rewrite of the step function.
+
   No external imports needed. The file follows the same structural
-  shape as `ObsTeach.Foundations` from the main book, so the patterns
-  carry over.
+  shape as `ObsTeach.Foundations` from the main book.
 -/
 
 namespace LabourJustice
@@ -57,10 +65,7 @@ def jNext : (s : JState) → JDir s → JState
 def jCoalg : Coalgebra jPoly JState where
   step s := ⟨s, jNext s⟩
 
-/-! ## §3. The Labour system
-
-  Three positions and five labelled directions, same pattern.
--/
+/-! ## §3. The Labour system -/
 
 inductive LState | working | unemployed | NILF
   deriving Repr, DecidableEq, Inhabited
@@ -88,13 +93,10 @@ def lCoalg : Coalgebra lPoly LState where
 
 /-! ## §4. Tensor of polynomials and the raw parallel coalgebra
 
-  Putting two systems side by side in `Poly`: positions multiply,
-  directions sum. The resulting parallel coalgebra interleaves —
-  one direction fires per step, from either subsystem.
-
-  This is the "raw" composition: it allows any joint state, including
-  ones we want to forbid (e.g. imprisoned ∧ working). The wirings of
-  §5 rule those out.
+  In `Poly` the tensor `p ⊗ q` has positions `p.Pos × q.Pos` and at
+  each position `(i, j)` the direction set `p.Dir i ⊕ q.Dir j`. A
+  coalgebra over the tensor interleaves: one direction fires per step
+  from either subsystem.
 -/
 
 def Polynomial.tensor (p q : Polynomial) : Polynomial where
@@ -111,78 +113,121 @@ def parallel {p q : Polynomial} {S T : Type}
       | .inl ds  => (cs.2 ds, st.2)
       | .inr ds' => (st.1, dt.2 ds')⟩
 
-/-! ## §5. Wirings
+/-- The bare parallel composition of Justice and Labour — no wirings. -/
+def rawJoint : Coalgebra (jPoly.tensor lPoly) (JState × LState) :=
+  parallel jCoalg lCoalg
 
-  Two flavours, both as small total functions:
+/-! ## §5. Wirings as a separate type
 
-  * `wireInvariant` is **state-based**: while justice is `imprisoned`,
-    labour is forced to `NILF`. Holds at the end of every tick.
-  * The inline match on `dj` inside `wiredJoint` is **event-based**:
-    the specific direction `imprisoned_to_free` sets labour to
-    `unemployed` (someone just released re-enters the labour force).
+  A `Wiring p S` is a typed post-processor on next-state values.
+  Crucially:
 
-  The invariant is enforced last so it overrides the event consequence
-  if they conflict.
+  - The **position** of the step is fixed (a wiring cannot change
+    which position the system is reporting, because doing so would
+    invalidate the direction type of the next-state function).
+  - The wiring can read both the firing **position** `i` and the
+    firing **direction** `d`, and rewrite the resulting next-state.
+
+  Wirings compose. Composition is associative; the identity wiring
+  is a left and right unit. So `Wiring p S` is a monoid acting on
+  the set of coalgebras over `p` with carrier `S`.
 -/
 
-def wireInvariant : JState × LState → JState × LState
-  | (.imprisoned, _) => (.imprisoned, .NILF)
-  | jl              => jl
+def Wiring (p : Polynomial) (S : Type) : Type :=
+  (i : p.Pos) → p.Dir i → S → S
 
-/-! ## §6. The wired joint coalgebra
+namespace Wiring
 
-  Same shape as `parallel`, but the next-state map applies the
-  event-based and state-based wirings before returning the joint state.
-  We inline `jNext` and `lNext` directly so the position equality is
-  visible to the elaborator.
+/-- The identity wiring: leave next states alone. -/
+def id {p : Polynomial} {S : Type} : Wiring p S :=
+  fun _ _ s => s
+
+/-- Sequential composition: `comp w₁ w₂` runs `w₂` first, then `w₁`. -/
+def comp {p : Polynomial} {S : Type} (w₁ w₂ : Wiring p S) : Wiring p S :=
+  fun i d s => w₁ i d (w₂ i d s)
+
+end Wiring
+
+/-- Apply a wiring to a coalgebra. The position is unchanged; the
+    next-state function is replaced by `fun d => w i d (k d)`. -/
+def Coalgebra.wire {p : Polynomial} {S : Type}
+    (c : Coalgebra p S) (w : Wiring p S) : Coalgebra p S where
+  step s :=
+    let ⟨i, k⟩ := c.step s
+    ⟨i, fun d => w i d (k d)⟩
+
+/-! ## §6. The two wirings of the labour/justice system
+
+  Each wiring is a value of type `Wiring (jPoly.tensor lPoly) (JState × LState)`.
+  They do not modify positions; they modify the next-state values
+  delivered by the raw parallel coalgebra.
 -/
 
-def wiredJoint : Coalgebra (jPoly.tensor lPoly) (JState × LState) where
-  step jl :=
-    let j := jl.1
-    let l := jl.2
-    ⟨(j, l), fun
-      | .inl dj =>
-          let j' := jNext j dj
-          let l' := match dj with
-            | .imprisoned_to_free => LState.unemployed
-            | _                   => l
-          wireInvariant (j', l')
-      | .inr dl =>
-          let l' := lNext l dl
-          wireInvariant (j, l')⟩
+/-- State-based invariant: snap any next state of the form
+    `(imprisoned, _)` to `(imprisoned, NILF)`. The direction is
+    irrelevant — the wiring fires after every step. -/
+def wireInvariant : Wiring (jPoly.tensor lPoly) (JState × LState) :=
+  fun _ _ s =>
+    match s with
+    | (.imprisoned, _) => (.imprisoned, .NILF)
+    | _ => s
 
-/-! ## §7. Concrete one-step examples
+/-- Event-based release: when the firing direction is the Justice
+    direction `imprisoned_to_free`, set the labour component of the
+    next state to `unemployed`. -/
+def wireRelease : Wiring (jPoly.tensor lPoly) (JState × LState) :=
+  fun i d s =>
+    match i, d with
+    | (.imprisoned, _), .inl .imprisoned_to_free => (s.1, .unemployed)
+    | _, _ => s
 
-  Pick specific directions and watch the joint state evolve. These
-  mirror the Python demo: the lens-style wirings appear here as
-  overrides to the next-state map of `wiredJoint`.
+/-! ## §7. The wired joint coalgebra by composition
+
+  The wired joint coalgebra is `rawJoint` with both wirings applied.
+  `wireRelease` runs first (event consequence), then `wireInvariant`
+  (state invariant) — the tiered precedence rule of the companion
+  guide. Composition is `(rawJoint.wire wireRelease).wire wireInvariant`,
+  which is equivalent to `rawJoint.wire (Wiring.comp wireInvariant wireRelease)`
+  by associativity.
 -/
 
-/-- From (free, working), Justice fires `free_to_accused`. -/
+def wiredJoint : Coalgebra (jPoly.tensor lPoly) (JState × LState) :=
+  (rawJoint.wire wireRelease).wire wireInvariant
+
+/-- Same thing, expressed by composing the wirings *first* and then
+    applying once. This compiles to the same step function modulo
+    associativity. -/
+def wiredJointAlt : Coalgebra (jPoly.tensor lPoly) (JState × LState) :=
+  rawJoint.wire (Wiring.comp wireInvariant wireRelease)
+
+/-! ## §8. Concrete one-step examples
+
+  Same scenarios as before. The wirings are now first-class objects,
+  but the dynamics are identical.
+-/
+
+/-- From `(free, working)`, Justice fires `free_to_accused`. -/
 def step1 : JState × LState :=
   match wiredJoint.step (JState.free, LState.working) with
   | ⟨_, k⟩ => k (.inl .free_to_accused)
 
 #eval step1  -- expect (.accused, .working)
 
-/-- From step1, Justice fires `accused_to_imprisoned`.
-    The state-based wiring snaps labour to NILF. -/
+/-- From `step1`, Justice fires `accused_to_imprisoned`. -/
 def step2 : JState × LState :=
   match wiredJoint.step step1 with
   | ⟨_, k⟩ => k (.inl .accused_to_imprisoned)
 
-#eval step2  -- expect (.imprisoned, .NILF)
+#eval step2  -- expect (.imprisoned, .NILF) — state invariant fires
 
-/-- From step2, Justice fires `imprisoned_to_free`.
-    The event-based wiring sends labour to unemployed. -/
+/-- From `step2`, Justice fires `imprisoned_to_free`. -/
 def step3 : JState × LState :=
   match wiredJoint.step step2 with
   | ⟨_, k⟩ => k (.inl .imprisoned_to_free)
 
-#eval step3  -- expect (.free, .unemployed)
+#eval step3  -- expect (.free, .unemployed) — event wiring fires
 
-/-- A Labour-only step from step3: find a job. -/
+/-- From `step3`, Labour fires `find_job`. -/
 def step4 : JState × LState :=
   match wiredJoint.step step3 with
   | ⟨_, k⟩ => k (.inr .find_job)
