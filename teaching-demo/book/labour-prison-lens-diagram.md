@@ -29,20 +29,34 @@ Each subsystem is a four-port parametric lens. Parameters enter from
 the top, state from the left, observables and feedback travel along
 the right edge, and updated parameters exit at the bottom.
 
-```
-                       θ
-                        ↓
-        ┌──────────────────────┐
-        │                      │
-  S_t ──┤─●──→ [ π₁ ]──→ T_t   ├──→
-        │ │                    │
-        │ S_t                  │
-        │ ↓                    │
-S_{t+1} ┤──[ updateSys ]←── T_{t+1}
-        │                      │
-        └──────────┬───────────┘
-                   ↓
-                   θ
+```mermaid
+flowchart TB
+    classDef port fill:#fff,stroke:#000,stroke-width:1px
+    classDef block fill:#eee,stroke:#000,stroke-width:1px
+    classDef copy fill:#000,stroke:#000,color:#fff
+
+    theta_in(["θ"]):::port
+    S_in(["S_t"]):::port
+    T_out(["T_t"]):::port
+    T_obs(["T_t+1"]):::port
+    S_next(["S_t+1"]):::port
+    theta_out(["θ"]):::port
+
+    subgraph LENS["parametric lens"]
+        direction TB
+        copy(("●")):::copy
+        pi1["π₁"]:::block
+        upd["updateSys"]:::block
+        copy --> pi1
+        copy --> upd
+    end
+
+    theta_in --> pi1
+    S_in --> copy
+    pi1 --> T_out
+    T_obs --> upd
+    upd --> S_next
+    upd --> theta_out
 ```
 
 > [!note] What each port is
@@ -66,27 +80,66 @@ the forward leg is the *same* state threaded down into the update.
 
 Two of these lenses sit side by side, sharing parameter and state
 edges. The cross-system rules — wirings — travel along a horizontal
-channel in the *forward* half of the diagram.
+channel in the *forward* half of the diagram, shown as the dashed
+arrows pointing into Labour's `wirings` node.
 
-```
-              θ_J                                       θ_L
-               ↓                                         ↓
-   ┌────────────────────────┐               ┌────────────────────────┐
-   │       JUSTICE          │               │        LABOUR          │
-   │                        │               │                        │
-S_J,t─●──→ [ π₁_J ]──→ E_J ─┤── wiring(s) ──┤── (S_L,t adjusted) ─┐  │
-   │  │                     │    E_J, S_J   │                     │  │
-   │  │                     │               │                     ↓  │
-   │  S_J,t                 │               │  S_L,t─●─→ [ π₁_L ]─→ E_L ──→
-   │  ↓                     │               │        │                │
-S_J,t+1                     │               │        S_L,t            │
-   ↑                        │               │        ↓                │
-   │  [ update_J ]← E_J,obs │               │     [ update_L ]← E_L,obs
-   │                        │               │        ↓                │
-   │                        │               │     S_L,t+1             │
-   └───────────┬────────────┘               └───────────┬─────────────┘
-               ↓                                         ↓
-              θ_J                                       θ_L
+```mermaid
+flowchart LR
+    classDef port fill:#fff,stroke:#000,stroke-width:1px
+    classDef block fill:#eee,stroke:#000,stroke-width:1px
+    classDef copy fill:#000,stroke:#000,color:#fff
+    classDef wire fill:#ffe,stroke:#a80,stroke-width:1px,stroke-dasharray:4 2
+
+    theta_J(["θ_J"]):::port
+    S_J_in(["S_J,t"]):::port
+    S_J_next(["S_J,t+1"]):::port
+    E_J(["E_J"]):::port
+    E_J_obs(["E_J,obs"]):::port
+    theta_J_out(["θ_J"]):::port
+
+    subgraph Justice["JUSTICE"]
+        direction TB
+        copyJ(("●")):::copy
+        piJ["π₁_J"]:::block
+        updJ["update_J"]:::block
+        copyJ --> piJ
+        copyJ --> updJ
+    end
+
+    subgraph Labour["LABOUR"]
+        direction TB
+        copyL(("●")):::copy
+        wire["wirings"]:::wire
+        piL["π₁_L"]:::block
+        updL["update_L"]:::block
+        copyL --> wire
+        wire --> piL
+        copyL --> updL
+    end
+
+    theta_L(["θ_L"]):::port
+    S_L_in(["S_L,t"]):::port
+    S_L_next(["S_L,t+1"]):::port
+    E_L(["E_L"]):::port
+    E_L_obs(["E_L,obs"]):::port
+    theta_L_out(["θ_L"]):::port
+
+    theta_J --> piJ
+    S_J_in --> copyJ
+    piJ --> E_J
+    E_J_obs --> updJ
+    updJ --> S_J_next
+    updJ --> theta_J_out
+
+    theta_L --> piL
+    S_L_in --> copyL
+    piL --> E_L
+    E_L_obs --> updL
+    updL --> S_L_next
+    updL --> theta_L_out
+
+    piJ -. "event wiring" .-> wire
+    copyJ -. "state wiring" .-> wire
 ```
 
 > [!tip]
